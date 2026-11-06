@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Saúde da Frota | Painel demo</title>
+    <meta name="description" content="Painel demo de saúde da frota por análise de óleo, com dados sintéticos de uma empresa fictícia." />
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="demo.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a href="../#p-oleo">← Voltar ao portfólio</a>
+        <span class="badge">Dados sintéticos · Norte Máquinas (empresa fictícia)</span>
+      </header>
+
+      <h1>Saúde da frota por análise de óleo</h1>
+      <p class="sub">
+        Laudos de laboratório cruzados com o parque de máquinas. A lista no fim mostra os laudos críticos que ainda não
+        viraram ordem de serviço.
+      </p>
+
+      <div class="filters" role="group" aria-label="Filtros">
+        <label>Período
+          <select id="f-periodo">
+            <option value="r12">Últimos 12 meses fechados (R12)</option>
+            <option value="2026">FY 2026 (nov/25 – out/26)</option>
+            <option value="2025">FY 2025 (nov/24 – out/25)</option>
+            <option value="tudo">Tudo</option>
+          </select>
+        </label>
+        <label>Filial
+          <select id="f-filial"><option value="">Todas</option></select>
+        </label>
+        <label>Segmento
+          <select id="f-segmento">
+            <option value="">Todos</option>
+            <option>Agrícola</option>
+            <option>Construção</option>
+          </select>
+        </label>
+      </div>
+
+      <section class="kpis" aria-label="Indicadores">
+        <div class="kpi"><div class="v" id="k-laudos">–</div><div class="l">laudos no período</div></div>
+        <div class="kpi"><div class="v" id="k-maquinas">–</div><div class="l">máquinas monitoradas</div></div>
+        <div class="kpi"><div class="v" id="k-criticos">–</div><div class="l">laudos críticos</div></div>
+        <div class="kpi"><div class="v" id="k-atendidos">–</div><div class="l">críticos atendidos em até 30 dias</div></div>
+      </section>
+
+      <div class="grid two">
+        <section class="card">
+          <h2>Laudos por mês e condição</h2>
+          <p class="hint">Data do resultado do laudo. Passe o mouse para ver os números do mês.</p>
+          <div id="leg-mes"></div>
+          <div class="chart" id="c-mes"></div>
+        </section>
+        <section class="card">
+          <h2>Laudos críticos por filial</h2>
+          <p class="hint">Onde estão as máquinas em pior condição.</p>
+          <div class="chart" id="c-filial"></div>
+        </section>
+      </div>
+
+      <div class="grid two">
+        <section class="card">
+          <h2>Condição por família de máquina</h2>
+          <p class="hint">Participação de laudos anormais e críticos em cada família.</p>
+          <div class="chart" id="c-familia"></div>
+        </section>
+        <section class="card">
+          <h2>Tempo do laudo até a ordem de serviço</h2>
+          <p class="hint">Laudos críticos e anormais atendidos, por faixa de dias.</p>
+          <div class="chart" id="c-tempo"></div>
+        </section>
+      </div>
+
+      <section class="card" style="margin-top: 12px">
+        <h2>Lista de ação: críticos sem ordem de serviço</h2>
+        <p class="hint" id="h-lista">Mais antigos primeiro.</p>
+        <div id="t-lista"></div>
+      </section>
+
+      <p class="foot">
+        Painel demo do portfólio de José Vinícius Martines. Os dados foram gerados por <code>scripts/gerar_dados.py</code>
+        com semente fixa e não representam nenhuma empresa real. Ano fiscal de novembro a outubro.
+      </p>
+    </div>
+
+    <script type="module">
+      import { nf, pf, el, legend, stackedColumns, hBars, table, rotuloMes, fmtData, anoFiscal, cssVar } from './demo.js'
+
+      const data = await fetch('data/oleo.json').then((r) => r.json())
+      const hoje = data.geradoEm
+      const maq = new Map(data.parque.map((m) => [m.chassi, m]))
+      const STATUS = [
+        { name: 'Normal', var: '--st-normal' },
+        { name: 'Atenção', var: '--st-atencao' },
+        { name: 'Anormal', var: '--st-anormal' },
+        { name: 'Crítico', var: '--st-critico' },
+      ]
+      const cor = (st) => cssVar(STATUS.find((s) => s.name === st).var)
+
+      const fFilial = document.getElementById('f-filial')
+      ;[...new Set(data.parque.map((m) => m.filial))].sort().forEach((f) => fFilial.append(el('option', { text: f })))
+
+      legend(document.getElementById('leg-mes'), STATUS.map((s) => ({ label: s.name, color: cssVar(s.var) })))
+
+      const ymd = (d) => d.toISOString().slice(0, 10)
+      function noPeriodo(iso, p) {
+        if (p === 'tudo') return true
+        if (p === 'r12') {
+          // 12 meses fechados: o mês corrente, ainda incompleto, fica de fora
+          const fim = hoje.slice(0, 7)
+          const d = new Date(hoje.slice(0, 7) + '-01T12:00:00')
+          d.setMonth(d.getMonth() - 12)
+          return iso.slice(0, 7) >= ymd(d).slice(0, 7) && iso.slice(0, 7) < fim
+        }
+        return anoFiscal(iso) === +p
+      }
+
+      function render() {
+        const p = document.getElementById('f-periodo').value
+        const fil = fFilial.value
+        const seg = document.getElementById('f-segmento').value
+        const L = data.laudos
+          .map((l) => ({ ...l, m: maq.get(l.chassi) }))
+          .filter((l) => noPeriodo(l.resultado, p) && (!fil || l.m.filial === fil) && (!seg || l.m.segmento === seg))
+
+        const criticos = L.filter((l) => l.status === 'Crítico')
+        const atend30 = criticos.filter((l) => l.diasAteOS != null && l.diasAteOS <= 30).length
+        document.getElementById('k-laudos').textContent = nf.format(L.length)
+        document.getElementById('k-maquinas').textContent = nf.format(new Set(L.map((l) => l.chassi)).size)
+        document.getElementById('k-criticos').textContent = nf.format(criticos.length)
+        document.getElementById('k-atendidos').textContent = criticos.length ? pf.format(atend30 / criticos.length) : '–'
+
+        // por mês
+        const meses = [...new Set(L.map((l) => l.resultado.slice(0, 7)))].sort()
+        const porMes = (st) => meses.map((m) => L.filter((l) => l.status === st && l.resultado.startsWith(m)).length)
+        stackedColumns(document.getElementById('c-mes'), {
+          categories: meses.map(rotuloMes),
+          series: STATUS.map((s) => ({ name: s.name, color: cssVar(s.var), values: porMes(s.name) })),
+        })()
+
+        // críticos por filial
+        const pf2 = {}
+        for (const l of criticos) pf2[l.m.filial] = (pf2[l.m.filial] || 0) + 1
+        hBars(document.getElementById('c-filial'), {
+          items: Object.entries(pf2).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value),
+          color: cor('Crítico'),
+          label: 'laudos críticos',
+        })()
+
+        // família: % anormal + crítico
+        const fam = {}
+        for (const l of L) {
+          const f = (fam[l.m.familia] ??= { t: 0, r: 0 })
+          f.t++
+          if (l.status === 'Crítico' || l.status === 'Anormal') f.r++
+        }
+        hBars(document.getElementById('c-familia'), {
+          items: Object.entries(fam).map(([label, v]) => ({ label, value: v.r / v.t })).sort((a, b) => b.value - a.value),
+          color: cor('Anormal'),
+          fmt: pf.format,
+          label: 'anormais ou críticos',
+        })()
+
+        // tempo até OS
+        const faixas = [
+          ['até 7 dias', 0, 7],
+          ['8 a 15 dias', 8, 15],
+          ['16 a 30 dias', 16, 30],
+          ['mais de 30 dias', 31, 999],
+        ]
+        const at = L.filter((l) => l.diasAteOS != null)
+        hBars(document.getElementById('c-tempo'), {
+          items: faixas.map(([label, a, b]) => ({ label, value: at.filter((l) => l.diasAteOS >= a && l.diasAteOS <= b).length })),
+          color: cssVar('--series-1'),
+          label: 'laudos atendidos',
+        })()
+
+        // lista de ação
+        const pend = criticos.filter((l) => l.diasAteOS == null).sort((a, b) => a.resultado.localeCompare(b.resultado))
+        const dias = (iso) => Math.round((new Date(hoje) - new Date(iso)) / 86400000)
+        document.getElementById('h-lista').textContent =
+          `${nf.format(pend.length)} laudos críticos sem ordem de serviço. Mais antigos primeiro${pend.length > 15 ? '; mostrando 15' : ''}.`
+        table(
+          document.getElementById('t-lista'),
+          [
+            { label: 'Chassi', key: 'chassi' },
+            { label: 'Modelo', render: (r) => r.m.modelo },
+            { label: 'Cliente', render: (r) => r.m.cliente },
+            { label: 'Filial', render: (r) => r.m.filial },
+            { label: 'Compartimento', key: 'compartimento' },
+            { label: 'Laudo', render: (r) => fmtData(r.resultado) },
+            { label: 'Dias em aberto', num: true, render: (r) => nf.format(dias(r.resultado)) },
+            {
+              label: 'Condição',
+              render: (r) => {
+                const i = el('i')
+                i.style.background = cor(r.status)
+                return el('span', { class: 'pill' }, i, document.createTextNode(r.status))
+              },
+            },
+          ],
+          pend.slice(0, 15),
+        )
+      }
+
+      document.querySelectorAll('select').forEach((s) => s.addEventListener('change', render))
+      render()
+    </script>
+  </body>
+</html>

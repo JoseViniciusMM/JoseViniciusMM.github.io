@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pesquisas de Serviço | Painel demo</title>
+    <meta name="description" content="Painel demo de pesquisas de satisfação (NPS) com prévia do envio por WhatsApp, usando dados sintéticos." />
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="demo.css" />
+    <style>
+      .wa {
+        max-width: 420px;
+        padding: 16px;
+        border-radius: 12px;
+        background: #e9e3d8;
+        background-image: radial-gradient(rgb(0 0 0 / 0.04) 1px, transparent 1px);
+        background-size: 14px 14px;
+      }
+      :root:not([data-theme='light']) .wa {
+        background-color: #0f1a16;
+        background-image: radial-gradient(rgb(255 255 255 / 0.04) 1px, transparent 1px);
+      }
+      .bubble {
+        position: relative;
+        margin-left: auto;
+        max-width: 92%;
+        padding: 10px 12px 18px;
+        border-radius: 10px 2px 10px 10px;
+        background: #d8f5c8;
+        color: #111b21;
+        font-size: 14px;
+        line-height: 1.45;
+        white-space: pre-line;
+        box-shadow: 0 1px 1px rgb(0 0 0 / 0.08);
+      }
+      :root:not([data-theme='light']) .bubble {
+        background: #144d37;
+        color: #e9edef;
+      }
+      .bubble small {
+        position: absolute;
+        right: 10px;
+        bottom: 4px;
+        font-size: 11px;
+        opacity: 0.6;
+      }
+      .wa-head {
+        margin-bottom: 10px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a href="../#p-envio">← Voltar ao portfólio</a>
+        <span class="badge">Dados sintéticos · Norte Máquinas (empresa fictícia)</span>
+      </header>
+
+      <h1>Pesquisas de satisfação de serviços</h1>
+      <p class="sub">
+        Performance das pesquisas por filial e a mensagem que cada supervisor recebe no WhatsApp toda sexta-feira, gerada
+        a partir do mesmo recorte.
+      </p>
+
+      <div class="filters" role="group" aria-label="Filtros">
+        <label>Ciclo
+          <select id="f-mes"></select>
+        </label>
+        <label>Supervisor
+          <select id="f-sup"><option value="">Todos (visão geral)</option></select>
+        </label>
+      </div>
+
+      <section class="kpis" aria-label="Indicadores">
+        <div class="kpi"><div class="v" id="k-env">–</div><div class="l">pesquisas enviadas</div></div>
+        <div class="kpi"><div class="v" id="k-resp">–</div><div class="l">respondidas</div></div>
+        <div class="kpi"><div class="v" id="k-taxa">–</div><div class="l">taxa de resposta</div></div>
+        <div class="kpi"><div class="v" id="k-nps">–</div><div class="l">NPS do ciclo</div></div>
+      </section>
+
+      <div class="grid two">
+        <section class="card">
+          <h2>NPS por ciclo</h2>
+          <p class="hint">Últimos 12 ciclos. Use as setas do teclado ou o mouse para ver cada mês.</p>
+          <div class="chart" id="c-linha"></div>
+        </section>
+        <section class="card">
+          <h2>Promotores, neutros e detratores</h2>
+          <p class="hint">Participação de cada grupo nas respostas do ciclo, por filial.</p>
+          <div id="leg-grupos"></div>
+          <div class="chart" id="c-grupos"></div>
+        </section>
+      </div>
+
+      <div class="grid two">
+        <section class="card">
+          <h2>Performance por filial</h2>
+          <p class="hint">A mesma tabela que vai no corpo do e-mail semanal.</p>
+          <div id="t-perf"></div>
+        </section>
+        <section class="card">
+          <h2>Prévia do WhatsApp</h2>
+          <p class="hint">Escolha um supervisor no filtro para ver só as filiais dele.</p>
+          <div class="wa">
+            <div class="wa-head" id="wa-head"></div>
+            <div class="bubble" id="wa-msg"></div>
+          </div>
+        </section>
+      </div>
+
+      <p class="foot">
+        Painel demo do portfólio de José Vinícius Martines. Os dados foram gerados por <code>scripts/gerar_dados.py</code>
+        com semente fixa e não representam nenhuma empresa real. NPS = % promotores (notas 9 e 10) − % detratores (0 a 6).
+      </p>
+    </div>
+
+    <script type="module">
+      import { nf, pf, el, s, bindTip, legend, lineChart, table, responsive, rotuloMes, fmtData, cssVar } from './demo.js'
+
+      const data = await fetch('data/nps.json').then((r) => r.json())
+      const R = data.respostas
+      const ciclos = [...new Set(R.map((r) => r.envio.slice(0, 7)))].sort()
+      const fMes = document.getElementById('f-mes')
+      const fSup = document.getElementById('f-sup')
+      ciclos
+        .slice()
+        .reverse()
+        .forEach((c) => fMes.append(el('option', { value: c, text: c === data.geradoEm.slice(0, 7) ? `${rotuloMes(c)} (até ${fmtData(data.geradoEm)})` : rotuloMes(c) })))
+      fMes.value = ciclos.at(-2) // último ciclo fechado
+      ;[...new Set(data.filiais.map((f) => f.supervisor))].forEach((sp) => fSup.append(el('option', { text: sp })))
+
+      const GRUPOS = [
+        { name: 'Detratores', var: '--detrator', test: (n) => n <= 6 },
+        { name: 'Neutros', var: '--neutro', test: (n) => n === 7 || n === 8 },
+        { name: 'Promotores', var: '--promotor', test: (n) => n >= 9 },
+      ]
+      legend(document.getElementById('leg-grupos'), GRUPOS.map((g) => ({ label: g.name, color: cssVar(g.var) })))
+
+      function resumo(rows) {
+        const resp = rows.filter((r) => r.nota != null)
+        const prom = resp.filter((r) => r.nota >= 9).length
+        const detr = resp.filter((r) => r.nota <= 6).length
+        return {
+          env: rows.length,
+          resp: resp.length,
+          taxa: rows.length ? resp.length / rows.length : 0,
+          nps: resp.length ? Math.round(((prom - detr) / resp.length) * 100) : null,
+          grupos: GRUPOS.map((g) => (resp.length ? resp.filter((r) => g.test(r.nota)).length / resp.length : 0)),
+        }
+      }
+
+      function barras100(container, linhas) {
+        responsive(container, (W) => {
+          container.replaceChildren()
+          const row = 34
+          const lw = Math.min(120, W * 0.34)
+          const H = linhas.length * row
+          const iw = W - lw
+          const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img' })
+          linhas.forEach((l, i) => {
+            const y = i * row + (row - 18) / 2
+            svg.append(s('text', { x: 0, y: i * row + row / 2 + 4, 'font-size': 13, fill: cssVar('--ink'), text: l.label }))
+            let x = lw
+            l.grupos.forEach((v, gi) => {
+              const w = v * iw
+              if (w <= 0) return
+              const g = s('g', { class: 'hit' })
+              g.append(s('rect', { x, y: i * row, width: w, height: row, fill: 'transparent' }))
+              g.append(s('rect', { x: x + (gi ? 1 : 0), y, width: Math.max(0, w - (gi ? 2 : 0)), height: 18, fill: cssVar(GRUPOS[gi].var), class: 'mark', rx: gi === 0 || gi === 2 ? 3 : 0 }))
+              if (w > 36)
+                g.append(s('text', { x: x + w / 2, y: y + 13, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 600, fill: gi === 1 ? cssVar('--ink') : '#ffffff', text: pf.format(v) }))
+              bindTip(g, l.label, [{ label: GRUPOS[gi].name, value: pf.format(v), color: cssVar(GRUPOS[gi].var) }])
+              svg.append(g)
+              x += w
+            })
+          })
+          container.append(svg)
+        })()
+      }
+
+      function render() {
+        const mes = fMes.value
+        const sup = fSup.value
+        const base = R.filter((r) => !sup || r.supervisor === sup)
+        const doMes = base.filter((r) => r.envio.startsWith(mes))
+        const t = resumo(doMes)
+        document.getElementById('k-env').textContent = nf.format(t.env)
+        document.getElementById('k-resp').textContent = nf.format(t.resp)
+        document.getElementById('k-taxa').textContent = pf.format(t.taxa)
+        document.getElementById('k-nps').textContent = t.nps ?? '–'
+
+        const ult = ciclos.slice(-12)
+        const serie = ult.map((c) => resumo(base.filter((r) => r.envio.startsWith(c))).nps)
+        const menor = Math.min(0, ...serie.filter((v) => v != null))
+        lineChart(document.getElementById('c-linha'), {
+          categories: ult.map(rotuloMes),
+          values: serie,
+          color: cssVar('--series-1'),
+          name: 'NPS',
+          min: menor < 0 ? Math.floor(menor / 25) * 25 : 0,
+          max: 100,
+        })()
+
+        const filiais = data.filiais.filter((f) => !sup || f.supervisor === sup)
+        const porFilial = filiais.map((f) => ({ ...f, ...resumo(doMes.filter((r) => r.filial === f.filial)) }))
+        barras100(
+          document.getElementById('c-grupos'),
+          porFilial.map((f) => ({ label: f.filial, grupos: f.grupos })),
+        )
+
+        table(
+          document.getElementById('t-perf'),
+          [
+            { label: 'Filial', key: 'filial' },
+            { label: 'Enviadas', num: true, render: (r) => nf.format(r.env) },
+            { label: 'Respondidas', num: true, render: (r) => nf.format(r.resp) },
+            { label: '% resp.', num: true, render: (r) => pf.format(r.taxa) },
+            { label: 'NPS', num: true, render: (r) => (r.nps ?? '–').toString() },
+          ],
+          [...porFilial.sort((a, b) => (b.nps ?? -999) - (a.nps ?? -999)), { filial: 'Total', ...t }],
+        )
+
+        const nome = sup ? sup.split(' ')[0] : 'pessoal'
+        document.getElementById('wa-head').textContent = sup ? `Para: ${sup}` : 'Para: lista da gestão (visão geral)'
+        const linhas = porFilial.map((f) => `• ${f.filial}: ${nf.format(f.resp)}/${nf.format(f.env)} respondidas (${pf.format(f.taxa)}), NPS ${f.nps ?? '–'}`)
+        const msg = document.getElementById('wa-msg')
+        msg.replaceChildren(
+          document.createTextNode(
+            `Bom dia, ${nome}! 📊\nPerformance das pesquisas de serviço, ciclo ${rotuloMes(mes)}:\n\n${linhas.join('\n')}\n\nTotal: ${nf.format(t.resp)} de ${nf.format(t.env)} respondidas, NPS ${t.nps ?? '–'}.`,
+          ),
+          el('small', { text: '09:31' }),
+        )
+      }
+
+      fMes.addEventListener('change', render)
+      fSup.addEventListener('change', render)
+      render()
+    </script>
+  </body>
+</html>
